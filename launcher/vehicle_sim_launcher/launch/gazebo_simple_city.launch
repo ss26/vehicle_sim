@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+
+  <arg name="model" default="$(find vehicle_model)/urdf/vehicle.xacro"/>
+  <arg name="ns" default="/autoware_gazebo"/>
+  <arg name="gpu" default="false"/>
+  <param name="robot_description" command="$(find xacro)/xacro.py --inorder $(arg model) gpu:=$(arg gpu)" />
+  <arg name="rvizconfig" default="$(find urdf_tutorial)/rviz/urdf.rviz" />
+
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <!-- Important! Use this world specifically for ROS melodic! -->
+    <arg name="world_name" default="/home/ss26/ROS/vehicle_sim_ws/src/vehicle_sim/worlds/external/osrf_citysim/worlds/citysim_gazebo9.world"/> 
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model autoware_gazebo" />
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="world2odom" args="0 0 0 0 0 0 world odom" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="odom2basefp" args="0 0 0 0 0 0 odom base_footprint" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="basefp2map" args="0 0 0 0 0 0 base_footprint map" />
+  <node pkg="tf2_ros" type="static_transform_publisher" name="map2velodyne" args="0 0 0 0 0 0 map velodyne" />
+
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
+  <node name="rqt_robot_steering" pkg="rqt_robot_steering" type="rqt_robot_steering" />
+
+  <node pkg="fake_localization" type="fake_localization" name="fake_localization" />
+
+  <group ns="$(arg ns)">
+    <!-- Load joint controller configurations from YAML file to parameter server -->
+    <rosparam file="$(find vehicle_model)/config/controller.yaml" command="load"/>
+    <!-- load the controllers -->
+    <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
+          output="screen" 
+          args="wheel_left_rear_velocity_controller wheel_right_rear_velocity_controller steering_left_front_position_controller steering_right_front_position_controller joint_state_controller"/>
+    <!-- tf publisher -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+    <rosparam file="$(find vehicle_model)/config/vehicle_info.yaml" command="load"/>
+    <node name="vehicle_input_subscriber" pkg="vehicle_sim_interface" type="vehicle_input_subscriber" respawn="false"
+          output="screen">
+      <remap from="cmd_vel" to="/cmd_vel"/>
+      <remap from="twist_cmd" to="/twist_cmd"/>
+    </node>
+    <node name="vehicle_info_publisher" pkg="vehicle_sim_interface" type="vehicle_info_publisher" respawn="false"
+          output="screen">
+    </node>
+  </group>
+  
+  <!-- Octomap Server -->
+  <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+		<param name="resolution" value="0.05" />		
+		<!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+		<param name="frame_id" type="string" value="odom" />
+    <!-- <param name="base_frame_id" type="string" value="base_footprint" />		 -->
+		<!-- maximum range to integrate (speedup!) -->
+		<param name="sensor_model/max_range" value="20.0" />		
+		<!-- data source to integrate (PointCloud2) -->
+		<remap from="cloud_in" to="points_raw" />	
+	</node>
+
+</launch>
